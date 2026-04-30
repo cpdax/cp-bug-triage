@@ -1,0 +1,62 @@
+# All non-System fields on Bug work items
+# Source: https://childplus.visualstudio.com/ChildPlus
+
+CPAgile.NumberofAgenciesReportingIssue	Number of Agencies Reporting Issue
+CPAgile.Report	Report
+CPAgile.ReportedByAgency	Reported By Agency
+CPAgile.ReportedinInternalBuild	Reported in Internal Build
+CPAgile.Screen	Screen
+CPAgile.ScreenChange	Screen Change
+Custom.AutomationCandidate	Automation Candidate
+Custom.CPUMostWanted	CPU Most Wanted
+Custom.CRMTickets	CRM Tickets
+Custom.ContentReviewDueDate	Content Review Due Date
+Custom.DesignSolution	DesignSolution
+Custom.DesignTimeframe	Design Timeframe
+Custom.Documented	Documented
+Custom.EmergentWork	Emergent Work
+Custom.EngineeringEstimate	Engineering Estimate
+Custom.EngineerwhoCompletedWork	Engineer who Completed Work
+Custom.FeatureBranch	Feature Branch
+Custom.FeatureFlag	Feature Flag
+Custom.Impact	Impact
+Custom.MaxDevHrs	Max Dev Hrs
+Custom.MobileOnlyRelease	Mobile Only Release
+Custom.NameofAgencieswithIssue	Name of Agencies with Issue
+Custom.OriginalQACompletedBy	Original QA Completed By
+Custom.PassedRegressionTesting	Passed Regression Testing
+Custom.ProductManager	Product Manager
+Custom.ProductScore	Product Score
+Custom.QANotes	QA Notes
+Custom.QAnotRequired	QA not Required
+Custom.RequiredPRReviewer	Required PR Reviewer
+Custom.RequiresManualDeployment	Requires Manual Deployment
+Custom.SalesMostWanted	Sales Most Wanted
+Custom.ScoredBy	Scored By
+Custom.ScoredDate	Scored Date
+Custom.TSHighPriority	TS High Priority
+Custom.TargetVersion	Target Version
+Custom.TechSupportMostWanted	Tech Support Most Wanted
+Custom.TechnicalDebt	Technical Debt
+Custom.TriTeam	Tri Team
+Custom.WorkType	Work Type
+Microsoft.VSTS.Build.FoundIn	Found In
+Microsoft.VSTS.Build.IntegrationBuild	Integration Build
+Microsoft.VSTS.CMMI.Probability	Probability
+Microsoft.VSTS.Common.AcceptanceCriteria	Acceptance Criteria
+Microsoft.VSTS.Common.ActivatedBy	Activated By
+Microsoft.VSTS.Common.ActivatedDate	Activated Date
+Microsoft.VSTS.Common.Activity	Activity
+Microsoft.VSTS.Common.BacklogPriority	Backlog Priority
+Microsoft.VSTS.Common.ClosedBy	Closed By
+Microsoft.VSTS.Common.ClosedDate	Closed Date
+Microsoft.VSTS.Common.Priority	Priority
+Microsoft.VSTS.Common.ResolvedBy	Resolved By
+Microsoft.VSTS.Common.ResolvedDate	Resolved Date
+Microsoft.VSTS.Common.Severity	Severity
+Microsoft.VSTS.Common.StateChangeDate	State Change Date
+Microsoft.VSTS.Common.ValueArea	Value Area
+Microsoft.VSTS.Scheduling.Effort	Effort
+Microsoft.VSTS.Scheduling.RemainingWork	Remaining Work
+Microsoft.VSTS.TCM.ReproSteps	Repro Steps
+Microsoft.VSTS.TCM.SystemInfo	System Info
