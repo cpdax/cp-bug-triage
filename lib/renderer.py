@@ -13,6 +13,8 @@ import re
 from datetime import datetime
 from typing import Iterable
 
+from dateutil import parser as date_parser
+
 from lib.triage import (
     BugEvaluation,
     filter_by_role,
@@ -23,6 +25,13 @@ from lib.triage import (
 ROLE_LABELS = {
     "pm": "PM",
     "eng": "Engineering",
+    "design": "Design",
+}
+
+# Short labels used in the Missing column to keep cells readable.
+ROLE_SHORT_LABELS = {
+    "pm": "PM",
+    "eng": "Eng",
     "design": "Design",
 }
 
@@ -121,8 +130,9 @@ def _bug_table(evaluations: Iterable[BugEvaluation], role: str | None) -> str:
         "<th>Score</th>"
         "<th>T-shirt Size</th>"
         "<th>Acceptance Criteria</th>"
-        "<th>Age</th>"
         "<th>Owner</th>"
+        "<th>Last Action</th>"
+        "<th>Age</th>"
     )
     if show_missing:
         header += "<th>Missing</th>"
@@ -135,20 +145,21 @@ def _bug_table(evaluations: Iterable[BugEvaluation], role: str | None) -> str:
         score = _score_display(wi.fields)
         tshirt = _tshirt_display(wi.fields)
         ac = _ac_preview(wi.fields)
-        age = f"{ev.age_days}d"
         owner = _escape(wi.assigned_to or "—")
+        last_action = _last_action_display(wi.changed_date)
+        age = f"{ev.age_days}d"
         cells = (
             f"<td>{title_cell}</td>"
             f"<td>{priority}</td>"
             f"<td>{score}</td>"
             f"<td>{tshirt}</td>"
             f"<td>{ac}</td>"
-            f"<td>{age}</td>"
             f"<td>{owner}</td>"
+            f"<td>{last_action}</td>"
+            f"<td>{age}</td>"
         )
         if show_missing:
-            missing = ", ".join(ev.missing_by_role.get(role, []))
-            cells += f"<td>{_escape(missing)}</td>"
+            cells += f"<td>{_all_missing_display(ev)}</td>"
         rows.append(f"<tr>{cells}</tr>")
 
     return f"<table><tbody>{header}{''.join(rows)}</tbody></table>"
@@ -182,13 +193,17 @@ def _priority_display(priority: str) -> str:
 def _score_display(fields: dict) -> str:
     """Render product score with the breakdown equation when available.
 
+    Probability lives in Microsoft.VSTS.CMMI.Probability (the standard CMMI
+    field), Impact in Custom.Impact, and the resulting Product Score in
+    Custom.ProductScore. When all three are present, show the breakdown.
+
     Examples:
         Probability=3, Impact=3, Score=9  →  "9 (3 × 3)"
         Score=9 only                      →  "9"
         Probability=3, Impact=3 only      →  "3 × 3"
         nothing                           →  "—"
     """
-    probability = fields.get("Custom.Probability")
+    probability = fields.get("Microsoft.VSTS.CMMI.Probability")
     impact = fields.get("Custom.Impact")
     score = fields.get("Custom.ProductScore")
 
@@ -223,6 +238,39 @@ def _ac_preview(fields: dict) -> str:
     if len(text) > AC_PREVIEW_CHARS:
         text = text[:AC_PREVIEW_CHARS].rstrip() + "…"
     return _escape(text)
+
+
+def _last_action_display(changed_date: str) -> str:
+    """Format the last-changed date as YYYY-MM-DD, or em-dash if missing/unparseable."""
+    if not changed_date:
+        return "—"
+    try:
+        dt = date_parser.isoparse(changed_date)
+        return dt.strftime("%Y-%m-%d")
+    except (ValueError, TypeError):
+        return "—"
+
+
+def _all_missing_display(ev: BugEvaluation) -> str:
+    """Render every missing field on the bug, grouped by responsible role.
+
+    Format:
+        PM: Product Score, AC · Eng: T-shirt Size · Design: Design/Solution
+
+    Only roles that actually have missing fields are shown. If nothing is
+    missing (shouldn't happen in a role section but guard anyway), returns "—".
+    """
+    parts: list[str] = []
+    for role in ("pm", "eng", "design"):
+        missing = ev.missing_by_role.get(role) or []
+        if not missing:
+            continue
+        label = ROLE_SHORT_LABELS[role]
+        joined = ", ".join(_escape(m) for m in missing)
+        parts.append(f"<strong>{label}:</strong> {joined}")
+    if not parts:
+        return "—"
+    return " · ".join(parts)
 
 
 def _strip_html(html: str) -> str:
