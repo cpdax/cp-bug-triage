@@ -46,6 +46,7 @@ TEAMS = {
             "parent_page_id": "4068278285",
             "current_page_id": "4068278306",
             "historical_page_id": "4067295303",
+            "archive_page_id": "4067786794",
         },
     },
     "migration": {
@@ -58,6 +59,7 @@ TEAMS = {
             "parent_page_id": "4067426351",
             "current_page_id": "4068147228",
             "historical_page_id": "4068114464",
+            "archive_page_id": "4067295365",
         },
     },
     "online": {
@@ -70,6 +72,7 @@ TEAMS = {
             "parent_page_id": "4068311050",
             "current_page_id": "4067459088",
             "historical_page_id": "4067000363",
+            "archive_page_id": "4067426417",
         },
     },
     "platform": {
@@ -82,6 +85,7 @@ TEAMS = {
             "parent_page_id": "4067655715",
             "current_page_id": "4067360797",
             "historical_page_id": "4067295324",
+            "archive_page_id": "4066836533",
         },
     },
 }

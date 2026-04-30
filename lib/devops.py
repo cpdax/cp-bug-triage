@@ -82,6 +82,43 @@ class DevOpsClient:
             items.extend(batch)
         return items
 
+    def fetch_titles(self, ids: list[int]) -> dict[int, dict[str, str]]:
+        """Fetch just titles + URLs for arbitrary bug IDs (state-agnostic).
+
+        Used for archiving notes whose bugs are no longer in Awaiting Tri-Team —
+        we still want to render their titles in the archive entries, but they
+        don't show up in the regular WIQL queries anymore.
+
+        Returns a {bug_id: {"title": str, "url": str}} dict. Missing/invalid
+        IDs are silently skipped (errorPolicy=Omit).
+        """
+        if not ids:
+            return {}
+
+        url = self._api("wit/workitemsbatch?api-version=7.1")
+        out: dict[int, dict[str, str]] = {}
+        for i in range(0, len(ids), 200):
+            batch_ids = ids[i : i + 200]
+            body = {
+                "ids": batch_ids,
+                "fields": ["System.Id", "System.Title"],
+                "errorPolicy": "Omit",
+            }
+            resp = self._session.post(url, json=body, timeout=30)
+            resp.raise_for_status()
+            for raw in resp.json().get("value", []):
+                if not raw:
+                    continue
+                bug_id = raw.get("id")
+                if bug_id is None:
+                    continue
+                title = raw.get("fields", {}).get("System.Title", "")
+                out[int(bug_id)] = {
+                    "title": title,
+                    "url": f"{self.org_url}/{self.project}/_workitems/edit/{bug_id}",
+                }
+        return out
+
     def _fetch_batch(self, ids: list[int]) -> list[WorkItem]:
         url = self._api("wit/workitemsbatch?api-version=7.1")
         body = {"ids": ids, "fields": [], "$expand": "all"}

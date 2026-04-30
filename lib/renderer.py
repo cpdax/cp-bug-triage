@@ -15,6 +15,7 @@ from typing import Iterable
 
 from dateutil import parser as date_parser
 
+from lib.notes import notes_instruction_banner, render_notes_row
 from lib.triage import (
     BugEvaluation,
     filter_by_role,
@@ -51,8 +52,14 @@ def render_page(
     page_kind: str,  # "Current" or "Historical"
     evaluations: list[BugEvaluation],
     refreshed_by: str,
+    notes: dict[int, str] | None = None,
 ) -> tuple[str, str]:
-    """Build (title, body) for one Confluence page."""
+    """Build (title, body) for one Confluence page.
+
+    The optional `notes` dict, if supplied, maps bug ID to note text. Notes
+    are interleaved as a second row beneath each bug's main row.
+    """
+    notes = notes or {}
     title = f"{page_kind} Bugs — {team_display_name}"
     timestamp = _now_eastern_string()
     stats = summary_stats(evaluations)
@@ -60,16 +67,17 @@ def render_page(
     parts: list[str] = []
     parts.append(f"<h1>{title}</h1>")
     parts.append(_warning_banner())
+    parts.append(notes_instruction_banner())
     parts.append(
         f"<p><em>Last refreshed: {timestamp} by {_escape(refreshed_by)}</em></p>"
     )
     parts.append(_summary_section(stats))
 
     for role in ("pm", "eng", "design"):
-        section = _role_section(role, filter_by_role(evaluations, role))
+        section = _role_section(role, filter_by_role(evaluations, role), notes)
         parts.append(section)
 
-    parts.append(_ready_section(ready_to_advance(evaluations)))
+    parts.append(_ready_section(ready_to_advance(evaluations), notes))
 
     return title, "".join(parts)
 
@@ -80,10 +88,11 @@ def render_page(
 
 def _warning_banner() -> str:
     return (
-        "<p><strong>⚠️ This page is auto-generated.</strong> "
-        "Do not edit directly — your changes will be overwritten on the next "
-        "refresh. Add notes and context to the parent <strong>Bug Triage</strong> "
-        "page instead.</p>"
+        '<div data-type="panel-warning">'
+        "<p>⚠️ <strong>Bug data on this page is auto-generated.</strong> "
+        "Edits to the bug rows themselves (titles, scores, missing fields) will be "
+        "overwritten on the next refresh. Notes are preserved — see below."
+        "</p></div>"
     )
 
 
@@ -105,24 +114,34 @@ def _summary_section(stats: dict[str, int]) -> str:
     )
 
 
-def _role_section(role: str, evaluations: list[BugEvaluation]) -> str:
+def _role_section(
+    role: str, evaluations: list[BugEvaluation], notes: dict[int, str]
+) -> str:
     label = ROLE_LABELS[role]
     heading = f"<h2>🟡 Waiting on {label} ({len(evaluations)})</h2>"
     if not evaluations:
         return heading + "<p><em>No bugs blocked on this role.</em></p>"
-    return heading + _bug_table(evaluations, role=role)
+    return heading + _bug_table(evaluations, role=role, notes=notes)
 
 
-def _ready_section(evaluations: list[BugEvaluation]) -> str:
+def _ready_section(
+    evaluations: list[BugEvaluation], notes: dict[int, str]
+) -> str:
     heading = f"<h2>✅ Ready to advance ({len(evaluations)})</h2>"
     if not evaluations:
         return heading + "<p><em>No bugs ready to advance.</em></p>"
-    return heading + _bug_table(evaluations, role=None)
+    return heading + _bug_table(evaluations, role=None, notes=notes)
 
 
-def _bug_table(evaluations: Iterable[BugEvaluation], role: str | None) -> str:
+def _bug_table(
+    evaluations: Iterable[BugEvaluation],
+    role: str | None,
+    notes: dict[int, str],
+) -> str:
     rows = []
     show_missing = role is not None
+    column_count = 9 if show_missing else 8
+
     header = (
         "<tr>"
         "<th>Bug</th>"
@@ -161,6 +180,8 @@ def _bug_table(evaluations: Iterable[BugEvaluation], role: str | None) -> str:
         if show_missing:
             cells += f"<td>{_all_missing_display(ev)}</td>"
         rows.append(f"<tr>{cells}</tr>")
+        # Per-bug notes row, preserved across refreshes
+        rows.append(render_notes_row(wi.id, notes.get(wi.id), column_count))
 
     return f"<table><tbody>{header}{''.join(rows)}</tbody></table>"
 

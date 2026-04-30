@@ -18,6 +18,12 @@ import streamlit as st
 from config.teams import OWNERS, TEAMS, teams_for_owner, wiql_for
 from lib.confluence import ConfluenceClient
 from lib.devops import DevOpsClient
+from lib.notes import (
+    archive_entry_html,
+    extract_notes,
+    prepend_archive_entries,
+    today_iso_date,
+)
 from lib.renderer import render_page
 from lib.triage import evaluate_bugs, summary_stats
 
@@ -194,7 +200,9 @@ def _run_refresh(team_keys: list[str]):
     overall = st.empty()
     progress_bar = st.progress(0)
 
-    total_steps = len(team_keys) * 2  # 2 queries per team
+    # 4 phases per team (read, query, archive, update). Archive is shown as
+    # a sub-step only when there are orphaned notes; the bar still counts it.
+    total_steps = len(team_keys) * 4
     step = 0
 
     for team_key in team_keys:
@@ -203,54 +211,173 @@ def _run_refresh(team_keys: list[str]):
             "team": team["display_name"],
             "current": None,
             "historical": None,
+            "archived_count": 0,
             "errors": [],
         }
-
-        for kind, page_id_key in (
-            ("current", "current_page_id"),
-            ("historical", "historical_page_id"),
-        ):
-            try:
-                overall.markdown(
-                    f"**{team['display_name']}** — {kind.capitalize()}: bothering Azure DevOps…"
-                )
-                step += 1
-                progress_bar.progress(step / total_steps)
-
-                wiql = wiql_for(team_key, kind)
-                items = devops.fetch_by_wiql(wiql)
-
-                overall.markdown(
-                    f"**{team['display_name']}** — {kind.capitalize()}: counting what's missing on {len(items)} bug(s)…"
-                )
-                evaluations = evaluate_bugs(items)
-                stats = summary_stats(evaluations)
-
-                overall.markdown(
-                    f"**{team['display_name']}** — {kind.capitalize()}: strong-arming Confluence…"
-                )
-                title, body = render_page(
-                    team_display_name=team["display_name"],
-                    page_kind=kind.capitalize(),
-                    evaluations=evaluations,
-                    refreshed_by=owner_name,
-                )
-                confluence.update_page(
-                    page_id=team["confluence"][page_id_key],
-                    title=title,
-                    body_markdown=body,
-                    version_message=f"Refreshed by {owner_name} via CP Bug Triage app",
-                )
-                team_result[kind] = stats
-            except Exception as exc:
-                team_result["errors"].append(f"{kind.capitalize()}: {exc}")
-            time.sleep(0.1)
+        _run_team_refresh(
+            team_key,
+            team,
+            owner_name,
+            devops,
+            confluence,
+            overall,
+            lambda: _bump_progress(progress_bar, step, total_steps),
+            team_result,
+        )
+        # Each team consumes 4 progress slots regardless
+        step += 4
+        progress_bar.progress(min(step / total_steps, 1.0))
         results.append(team_result)
+        time.sleep(0.1)
 
     progress_bar.progress(1.0)
     overall.empty()
     st.success("Done.")
     _render_results(results)
+
+
+def _bump_progress(bar, step, total):
+    bar.progress(min(step / total, 1.0))
+
+
+def _run_team_refresh(
+    team_key: str,
+    team: dict,
+    owner_name: str,
+    devops: DevOpsClient,
+    confluence: ConfluenceClient,
+    overall_slot,
+    bump,
+    team_result: dict[str, Any],
+):
+    """Refresh both Current and Historical pages for one team, with note archiving."""
+    team_name = team["display_name"]
+    current_page_id = team["confluence"]["current_page_id"]
+    historical_page_id = team["confluence"]["historical_page_id"]
+    archive_page_id = team["confluence"]["archive_page_id"]
+
+    # ---- Phase 1: Read existing notes from both pages -----------------------
+    overall_slot.markdown(f"**{team_name}** · reading existing notes…")
+    bump()
+    current_html = ""
+    historical_html = ""
+    try:
+        current_html = confluence.fetch_page_storage(current_page_id)
+    except Exception:
+        current_html = ""
+    try:
+        historical_html = confluence.fetch_page_storage(historical_page_id)
+    except Exception:
+        historical_html = ""
+    # Current's notes win on conflict (most recent edit assumed to be there).
+    notes_pool: dict[int, str] = {
+        **extract_notes(historical_html),
+        **extract_notes(current_html),
+    }
+
+    # ---- Phase 2: Query DevOps for both kinds -------------------------------
+    overall_slot.markdown(f"**{team_name}** · bothering Azure DevOps…")
+    bump()
+    current_items = []
+    historical_items = []
+    try:
+        current_items = devops.fetch_by_wiql(wiql_for(team_key, "current"))
+    except Exception as exc:
+        team_result["errors"].append(f"DevOps query (Current): {exc}")
+    try:
+        historical_items = devops.fetch_by_wiql(wiql_for(team_key, "historical"))
+    except Exception as exc:
+        team_result["errors"].append(f"DevOps query (Historical): {exc}")
+
+    # If both queries failed, bail without archiving — we'd otherwise wipe
+    # every note as "orphaned" since the active set looks empty.
+    if not current_items and not historical_items and team_result["errors"]:
+        return
+
+    all_active_ids: set[int] = {item.id for item in current_items} | {
+        item.id for item in historical_items
+    }
+
+    # ---- Phase 3: Archive orphaned notes -----------------------------------
+    orphan_ids = [bid for bid in notes_pool.keys() if bid not in all_active_ids]
+    if orphan_ids:
+        overall_slot.markdown(
+            f"**{team_name}** · archiving {len(orphan_ids)} closed-bug note(s)…"
+        )
+    bump()
+    if orphan_ids:
+        try:
+            titles = devops.fetch_titles(orphan_ids)
+            today = today_iso_date()
+            entries = []
+            for bid in orphan_ids:
+                meta = titles.get(bid, {})
+                entries.append(
+                    archive_entry_html(
+                        bug_id=bid,
+                        bug_title=meta.get("title", ""),
+                        bug_url=meta.get(
+                            "url",
+                            f"{devops.org_url}/{devops.project}/_workitems/edit/{bid}",
+                        ),
+                        note_text=notes_pool[bid],
+                        archived_date=today,
+                    )
+                )
+
+            existing_archive_html = ""
+            try:
+                existing_archive_html = confluence.fetch_page_storage(archive_page_id)
+            except Exception as exc:
+                team_result["errors"].append(f"Archive read: {exc}")
+
+            updated_archive_html = prepend_archive_entries(
+                existing_archive_html, entries
+            )
+            if updated_archive_html and updated_archive_html != existing_archive_html:
+                confluence.update_page(
+                    page_id=archive_page_id,
+                    title=f"Closed Bug Notes — {team_name}",
+                    body_markdown=updated_archive_html,
+                    version_message=(
+                        f"Archived {len(entries)} note(s) by {owner_name}"
+                    ),
+                )
+                team_result["archived_count"] = len(entries)
+        except Exception as exc:
+            team_result["errors"].append(f"Archive write: {exc}")
+
+    # ---- Phase 4: Render and update both active pages -----------------------
+    overall_slot.markdown(f"**{team_name}** · strong-arming Confluence…")
+    bump()
+    for kind, items, page_id in (
+        ("current", current_items, current_page_id),
+        ("historical", historical_items, historical_page_id),
+    ):
+        if not items and any(
+            err.startswith(f"DevOps query ({kind.capitalize()})")
+            for err in team_result["errors"]
+        ):
+            continue  # query failed earlier, don't blank the page
+        try:
+            evaluations = evaluate_bugs(items)
+            stats = summary_stats(evaluations)
+            title, body = render_page(
+                team_display_name=team_name,
+                page_kind=kind.capitalize(),
+                evaluations=evaluations,
+                refreshed_by=owner_name,
+                notes=notes_pool,
+            )
+            confluence.update_page(
+                page_id=page_id,
+                title=title,
+                body_markdown=body,
+                version_message=f"Refreshed by {owner_name} via CP Bug Triage app",
+            )
+            team_result[kind] = stats
+        except Exception as exc:
+            team_result["errors"].append(f"{kind.capitalize()} update: {exc}")
 
 
 def _render_results(results: list[dict[str, Any]]):
@@ -259,6 +386,10 @@ def _render_results(results: list[dict[str, Any]]):
         if r["errors"]:
             for err in r["errors"]:
                 st.error(err)
+        if r.get("archived_count"):
+            st.info(
+                f"📦 Archived {r['archived_count']} note(s) for closed bugs."
+            )
         if r["current"]:
             _render_stats_block("Current Bugs", r["current"])
         if r["historical"]:
