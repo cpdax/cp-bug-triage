@@ -2,10 +2,11 @@
 
 Workflow:
   1. User enters the shared app password.
-  2. Picks themselves (Amy or Justina). Picker shows their portrait card.
-  3. App shows the team(s) they own — one button per team plus a "Both" button.
-  4. User clicks a team button → big red REFRESH button appears.
-  5. Click → progress states → confirmation with stats and Confluence links.
+  2. Single screen: checkboxes for the 4 CP team spaces + a refresh button.
+  3. Click → progress states → confirmation with stats and Confluence links.
+
+Anyone with the password can refresh any combination of spaces. Owner labels
+next to each checkbox are hint text only.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from typing import Any
 
 import streamlit as st
 
-from config.teams import OWNERS, TEAMS, teams_for_owner, wiql_for
+from config.teams import TEAMS, wiql_for
 from lib.confluence import ConfluenceClient
 from lib.devops import DevOpsClient
 from lib.notes import (
@@ -83,108 +84,70 @@ with st.sidebar:
     st.caption("Owned by Product Operations · contact Dax Collins")
     st.divider()
     if st.button("Sign out"):
-        for k in ("authenticated", "owner", "selected_team"):
-            st.session_state.pop(k, None)
+        for k in list(st.session_state.keys()):
+            if k.startswith(("cb_", "authenticated", "password_input")):
+                st.session_state.pop(k, None)
         st.rerun()
 
 
 # =============================================================================
-# Owner picker
+# Main screen — team checkboxes + refresh button
 # =============================================================================
 
-def _render_owner_picker() -> str | None:
-    """Show two owner cards. Return the selected owner key or None."""
+def _render_main_screen():
     st.title("🐞 CP Bug Triage")
-    st.write("Pick the legend who's running triage today.")
+    st.markdown("Check the spaces you want to refresh, then hit the button.")
     st.write("")
 
-    cols = st.columns(2)
-    selected = st.session_state.get("owner")
-
-    for col, key in zip(cols, ("amy", "justina")):
-        owner = OWNERS[key]
-        with col:
-            try:
-                st.image(owner["avatar_path"], use_container_width=True)
-            except Exception:
-                st.markdown(
-                    "<div style='background:#F3F4F6;height:200px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:48px;'>👤</div>",
-                    unsafe_allow_html=True,
-                )
-            st.markdown(f"### {owner['display_name']}")
-            st.markdown(f"**{owner['title']}**")
-            st.caption(owner["tagline"])
-            if st.button(
-                f"I'm {owner['display_name'].split()[0]}",
-                key=f"pick_{key}",
-                use_container_width=True,
-                type="primary" if selected == key else "secondary",
-            ):
-                st.session_state["owner"] = key
-                st.session_state.pop("selected_team", None)
-                st.rerun()
-    return selected
-
-
-# =============================================================================
-# Team picker
-# =============================================================================
-
-def _render_team_picker(owner_key: str):
-    """Show buttons for each team this owner runs, plus Both."""
-    owner = OWNERS[owner_key]
-    teams = teams_for_owner(owner_key)
-    team_keys = list(teams.keys())
-
-    st.markdown(f"## Hey, {owner['display_name'].split()[0]}.")
-    st.markdown("Which team are we refreshing?")
-    st.write("")
-
-    cols = st.columns(len(team_keys) + 1)
-    for col, team_key in zip(cols[:-1], team_keys):
-        team = teams[team_key]
-        with col:
-            if st.button(
-                team["display_name"],
-                key=f"team_{team_key}",
-                use_container_width=True,
-            ):
-                st.session_state["selected_team"] = [team_key]
-                st.rerun()
-    with cols[-1]:
-        if st.button("⚡ Both", key="team_both", use_container_width=True, type="primary"):
-            st.session_state["selected_team"] = team_keys
+    # Quick-select helpers
+    helper_cols = st.columns([1, 1, 4])
+    with helper_cols[0]:
+        if st.button("Select all", use_container_width=True):
+            for team_key in TEAMS:
+                st.session_state[f"cb_{team_key}"] = True
+            st.rerun()
+    with helper_cols[1]:
+        if st.button("Clear all", use_container_width=True):
+            for team_key in TEAMS:
+                st.session_state[f"cb_{team_key}"] = False
             st.rerun()
 
-    if st.button("← Switch person"):
-        st.session_state.pop("owner", None)
-        st.session_state.pop("selected_team", None)
-        st.rerun()
+    st.write("")
+
+    # Checkboxes
+    selected: list[str] = []
+    for team_key, team in TEAMS.items():
+        label = f"{team['display_name']} · *{team['owner_label']}*"
+        # Streamlit checkbox state persists in session via the key
+        is_checked = st.checkbox(
+            label,
+            key=f"cb_{team_key}",
+        )
+        if is_checked:
+            selected.append(team_key)
+
+    st.write("")
+
+    # Big red refresh button — disabled when nothing selected
+    refresh_clicked = st.button(
+        "🚨  REFRESH  🚨",
+        type="primary",
+        use_container_width=True,
+        disabled=not selected,
+    )
+    if not selected:
+        st.caption("Select at least one space to enable refresh.")
+
+    if refresh_clicked and selected:
+        _run_refresh(selected)
 
 
 # =============================================================================
-# Refresh action
+# Refresh execution
 # =============================================================================
-
-def _render_refresh_panel(team_keys: list[str]):
-    team_names = ", ".join(TEAMS[k]["display_name"] for k in team_keys)
-    st.markdown(f"## Refreshing: **{team_names}**")
-    st.write("")
-
-    if st.button("🚨  REFRESH  🚨", type="primary", use_container_width=True):
-        _run_refresh(team_keys)
-
-    st.write("")
-    if st.button("← Back"):
-        st.session_state.pop("selected_team", None)
-        st.rerun()
-
 
 def _run_refresh(team_keys: list[str]):
     """Execute the refresh for one or more teams. Show progress, then results."""
-    owner_key = st.session_state.get("owner") or "unknown"
-    owner_name = OWNERS.get(owner_key, {}).get("display_name", "Bug Triage app")
-
     devops = DevOpsClient(
         org_url=st.secrets["devops"]["org_url"],
         project=st.secrets["devops"]["project"],
@@ -200,10 +163,9 @@ def _run_refresh(team_keys: list[str]):
     overall = st.empty()
     progress_bar = st.progress(0)
 
-    # 4 phases per team (read, query, archive, update). Archive is shown as
-    # a sub-step only when there are orphaned notes; the bar still counts it.
+    # 4 phases per team (read, query, archive, update). Bar advances by 4 per team.
     total_steps = len(team_keys) * 4
-    step = 0
+    step_counter = {"step": 0}
 
     for team_key in team_keys:
         team = TEAMS[team_key]
@@ -217,16 +179,12 @@ def _run_refresh(team_keys: list[str]):
         _run_team_refresh(
             team_key,
             team,
-            owner_name,
             devops,
             confluence,
             overall,
-            lambda: _bump_progress(progress_bar, step, total_steps),
+            lambda: _bump_progress(progress_bar, step_counter, total_steps),
             team_result,
         )
-        # Each team consumes 4 progress slots regardless
-        step += 4
-        progress_bar.progress(min(step / total_steps, 1.0))
         results.append(team_result)
         time.sleep(0.1)
 
@@ -236,14 +194,14 @@ def _run_refresh(team_keys: list[str]):
     _render_results(results)
 
 
-def _bump_progress(bar, step, total):
-    bar.progress(min(step / total, 1.0))
+def _bump_progress(bar, counter, total):
+    counter["step"] += 1
+    bar.progress(min(counter["step"] / total, 1.0))
 
 
 def _run_team_refresh(
     team_key: str,
     team: dict,
-    owner_name: str,
     devops: DevOpsClient,
     confluence: ConfluenceClient,
     overall_slot,
@@ -339,9 +297,7 @@ def _run_team_refresh(
                     page_id=archive_page_id,
                     title=f"Closed Bug Notes — {team_name}",
                     body_markdown=updated_archive_html,
-                    version_message=(
-                        f"Archived {len(entries)} note(s) by {owner_name}"
-                    ),
+                    version_message=f"Archived {len(entries)} note(s)",
                 )
                 team_result["archived_count"] = len(entries)
         except Exception as exc:
@@ -366,14 +322,13 @@ def _run_team_refresh(
                 team_display_name=team_name,
                 page_kind=kind.capitalize(),
                 evaluations=evaluations,
-                refreshed_by=owner_name,
                 notes=notes_pool,
             )
             confluence.update_page(
                 page_id=page_id,
                 title=title,
                 body_markdown=body,
-                version_message=f"Refreshed by {owner_name} via CP Bug Triage app",
+                version_message="Refreshed via CP Bug Triage app",
             )
             team_result[kind] = stats
         except Exception as exc:
@@ -412,12 +367,4 @@ def _render_stats_block(label: str, stats: dict[str, int]):
 # Main flow
 # =============================================================================
 
-owner = st.session_state.get("owner")
-selected_team = st.session_state.get("selected_team")
-
-if not owner:
-    _render_owner_picker()
-elif not selected_team:
-    _render_team_picker(owner)
-else:
-    _render_refresh_panel(selected_team)
+_render_main_screen()

@@ -51,7 +51,6 @@ def render_page(
     team_display_name: str,
     page_kind: str,  # "Current" or "Historical"
     evaluations: list[BugEvaluation],
-    refreshed_by: str,
     notes: dict[int, str] | None = None,
 ) -> tuple[str, str]:
     """Build (title, body) for one Confluence page.
@@ -68,9 +67,7 @@ def render_page(
     parts.append(f"<h1>{title}</h1>")
     parts.append(_warning_banner())
     parts.append(notes_instruction_banner())
-    parts.append(
-        f"<p><em>Last refreshed: {timestamp} by {_escape(refreshed_by)}</em></p>"
-    )
+    parts.append(f"<p><em>Updated {timestamp}</em></p>")
     parts.append(_summary_section(stats))
 
     for role in ("pm", "eng", "design"):
@@ -316,13 +313,19 @@ def _strip_html(html: str) -> str:
 
 
 def _now_eastern_string() -> str:
-    """Format current time in Eastern Time as a readable string."""
+    """Format current time in Eastern Time as a human-readable string.
+
+    Example output: "April 30, 2026 at 6:32 PM ET"
+
+    Uses %-d / %-I (no leading zero) which works on Linux + macOS. Streamlit
+    Cloud runs Linux and local dev is Mac, so this is safe for both targets.
+    """
     try:
         from zoneinfo import ZoneInfo
         eastern = datetime.now(ZoneInfo("America/New_York"))
-        return eastern.strftime("%Y-%m-%d %I:%M %p %Z")
+        return eastern.strftime("%B %-d, %Y at %-I:%M %p ET")
     except Exception:
-        return datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+        return datetime.utcnow().strftime("%B %d, %Y at %H:%M UTC")
 
 
 def _escape(s: str) -> str:

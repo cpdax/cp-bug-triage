@@ -1,32 +1,12 @@
-"""Per-team configuration: Confluence page IDs, ADO TriTeam values, ownership.
+"""Per-team configuration: Confluence page IDs, ADO TriTeam values.
 
-Each team is keyed by a short slug used in the UI and URLs. The owner field
-maps to a Person key — the picker in app.py uses this to show only the teams
-owned by the selected person.
+Each team is keyed by a short slug used in the UI. The `owner_label` field is
+purely cosmetic — it appears as hint text in the team checkbox list so users
+remember whose space is whose. It has no functional effect on the refresh.
 
 Bug queries are constructed inline at runtime using the WIQL templates below.
 No saved queries in DevOps required.
 """
-
-# -----------------------------------------------------------------------------
-# Owners — the people who run triage. Photo paths are relative to repo root.
-# -----------------------------------------------------------------------------
-
-OWNERS = {
-    "amy": {
-        "display_name": "Amy Smith",
-        "title": "The Communications Crusader",
-        "tagline": "Domain: Communication & Migration",
-        "avatar_path": "static/avatars/amy.png",
-    },
-    "justina": {
-        "display_name": "Justina Stein",
-        "title": "Sentinel of the Platform",
-        "tagline": "Domain: Online & Platform",
-        "avatar_path": "static/avatars/justina.png",
-    },
-}
-
 
 # -----------------------------------------------------------------------------
 # Teams — one entry per CP tri-team.
@@ -38,7 +18,7 @@ OWNERS = {
 TEAMS = {
     "communication": {
         "display_name": "CP Communication",
-        "owner": "amy",
+        "owner_label": "Amy",
         "tri_team_value": "Team CPC (ChildPlus Connect)",
         "confluence": {
             "space_key": "CPC",
@@ -51,7 +31,7 @@ TEAMS = {
     },
     "migration": {
         "display_name": "CP Migration",
-        "owner": "amy",
+        "owner_label": "Amy",
         "tri_team_value": "Team ABE (Conversion Items)",
         "confluence": {
             "space_key": "ABE",
@@ -64,7 +44,7 @@ TEAMS = {
     },
     "online": {
         "display_name": "CP Online",
-        "owner": "justina",
+        "owner_label": "Justina",
         "tri_team_value": "Team C-JAN (Online Improvements)",
         "confluence": {
             "space_key": "JAN",
@@ -77,7 +57,7 @@ TEAMS = {
     },
     "platform": {
         "display_name": "CP Platform",
-        "owner": "justina",
+        "owner_label": "Justina",
         "tri_team_value": "Team JST (Platform Improvements)",
         "confluence": {
             "space_key": "JST",
@@ -117,11 +97,6 @@ WHERE [System.WorkItemType] = 'Bug'
   AND [System.CreatedDate] < @Today - 365
 ORDER BY [System.CreatedDate] DESC
 """
-
-
-def teams_for_owner(owner_key: str) -> dict:
-    """Return the subset of TEAMS owned by the given owner key."""
-    return {slug: cfg for slug, cfg in TEAMS.items() if cfg["owner"] == owner_key}
 
 
 def wiql_for(team_key: str, kind: str) -> str:
